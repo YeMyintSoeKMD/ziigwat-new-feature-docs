@@ -1,6 +1,6 @@
 The **minimal database change set** for the finalized serialized inventory + IMEI + buyback design.
 
-## 1. Existing tables — new columns to add
+# 1. Existing tables — new columns to add
 
 ### `items`
 
