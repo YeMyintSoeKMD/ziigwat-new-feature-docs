@@ -1,6 +1,6 @@
 The **minimal database change set** for the finalized serialized inventory + IMEI + buyback design.
 
-## Existing tables — new columns to add
+## 1. Existing tables — new columns to add
 
 ### `items`
 
@@ -72,7 +72,7 @@ Normal quantity transfers leave this `null`.
 
 ---
 
-# New tables
+# 2. New tables
 
 ## 1. `item_identifier_requirements`
 
