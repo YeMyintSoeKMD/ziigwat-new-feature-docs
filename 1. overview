@@ -1,0 +1,1730 @@
+# My question:
+```
+i am not going to implement this using codex. i am going to give another dev. 
+so could you pls write me a documentation for this how can i say, 
+system requirement or technical requirement or something that i can present to hime
+```
+
+---
+
+# ZiiGwat POS — Serialized Inventory / IMEI & Serial Tracking
+
+## Technical Requirement Specification
+
+**Project:** ZiiGwat POS
+**Feature:** Serialized Inventory / IMEI / Serial Number Tracking
+**Purpose:** Extend the existing inventory system to support tracking of individual physical devices such as phones, tablets, laptops, electronics, and other serialized products.
+
+---
+
+# 1. Background
+
+ZiiGwat POS currently manages inventory mainly using quantity-based stock.
+
+Example:
+
+- iPhone 15 Pro — 5 units
+- USB Cable — 20 units
+- Keyboard — 10 units
+
+For normal products, quantity tracking is sufficient.
+
+However, phone shops and electronics shops require tracking of individual physical devices using identifiers such as:
+
+- IMEI 1
+- IMEI 2
+- Serial Number
+- EID
+- Device Number
+- Other custom identifiers
+
+The system must therefore support both:
+
+1. Quantity-based inventory
+2. Serialized inventory
+
+The existing quantity-based inventory must continue to work without being replaced.
+
+---
+
+# 2. Main Objective
+
+Implement serialized inventory tracking as an additional inventory layer.
+
+The system must be able to answer questions such as:
+
+- Which IMEI is currently in stock?
+- Which location currently has the device?
+- Which supplier did the device come from?
+- What was the purchase cost of this specific device?
+- What is the asking price of this specific device?
+- Which customer bought this device?
+- Which order sold it?
+- Was the device returned?
+- Was it transferred between branches?
+- Was it damaged, lost, or repaired?
+- What is the complete history of this IMEI?
+
+---
+
+# 3. Existing Inventory System
+
+The current inventory architecture contains concepts similar to:
+
+```text
+items
+    ↓
+stocks
+    ↓
+stock_transactions
+```
+
+`stocks` stores the current aggregate stock quantity.
+
+Example:
+
+```text
+iPhone 15 Pro
+Yangon Branch
+Balance = 5
+```
+
+`stock_transactions` records quantity movements such as:
+
+- Purchase
+- Sale
+- Sale Return
+- Purchase Return
+- Adjustment
+- Transfer
+- Wastage
+- Loss
+- Opening Stock
+
+This system must remain.
+
+---
+
+# 4. New Serialized Inventory Architecture
+
+Serialized inventory will add another layer:
+
+```text
+items
+    │
+    └── inventory_units
+            │
+            ├── inventory_unit_identifiers
+            ├── inventory_unit_attributes
+            └── inventory_unit_movements
+```
+
+The full design becomes:
+
+```text
+QUANTITY INVENTORY
+
+items
+ ├── stocks
+ └── stock_transactions
+
+
+SERIALIZED INVENTORY
+
+items
+ └── inventory_units
+      ├── inventory_unit_identifiers
+      ├── inventory_unit_attributes
+      └── inventory_unit_movements
+```
+
+For serialized items, both systems must remain synchronized.
+
+---
+
+# 5. Inventory Tracking Types
+
+Each item must have an inventory tracking mode.
+
+Supported modes:
+
+```text
+quantity
+serialized
+```
+
+### Quantity
+
+Existing behavior.
+
+Examples:
+
+- Drinks
+- Rice
+- Cables
+- Accessories
+- General merchandise
+
+### Serialized
+
+Every physical unit must be registered individually.
+
+Examples:
+
+- Mobile phones
+- Laptops
+- Tablets
+- Cameras
+- Smart watches
+- Secondhand electronic devices
+
+---
+
+# 6. Important Design Principle
+
+Do NOT create tracking modes such as:
+
+```text
+imei
+serial
+device_number
+```
+
+A physical device may contain multiple identifiers.
+
+Example:
+
+```text
+iPhone
+
+IMEI 1
+IMEI 2
+Serial Number
+EID
+```
+
+Therefore the item is simply:
+
+```text
+inventory_tracking = serialized
+```
+
+The identifiers are stored separately.
+
+---
+
+# 7. Item Identifier Requirements
+
+Different products require different identifiers.
+
+The system should support configuring identifier requirements per item.
+
+Example:
+
+## iPhone
+
+| Identifier    | Required |
+| ------------- | -------- |
+| IMEI 1        | Yes      |
+| IMEI 2        | Optional |
+| Serial Number | Yes      |
+| EID           | Optional |
+
+## MacBook
+
+| Identifier    | Required |
+| ------------- | -------- |
+| Serial Number | Yes      |
+
+## Wi-Fi iPad
+
+| Identifier    | Required |
+| ------------- | -------- |
+| Serial Number | Yes      |
+
+Recommended table:
+
+## `item_identifier_requirements`
+
+| Field           | Purpose                                  |
+| --------------- | ---------------------------------------- |
+| id              | Primary key                              |
+| shop_id         | Shop                                     |
+| item_id         | Product                                  |
+| identifier_type | imei / serial / eid / device_no / custom |
+| slot            | IMEI 1 / IMEI 2                          |
+| label           | UI label                                 |
+| is_required     | Required or optional                     |
+| is_unique       | Whether duplication is allowed           |
+| validation_rule | Validation type                          |
+| sort_order      | Display order                            |
+| is_active       | Enable / disable                         |
+
+---
+
+# 8. Inventory Unit
+
+An inventory unit represents one exact physical device.
+
+Example:
+
+```text
+Item:
+iPhone 15 Pro 256GB Black
+
+Inventory Unit #101
+
+IMEI 1: 351234567890001
+IMEI 2: 351234567890019
+Serial: ABC123XYZ
+
+Condition: Used
+Grade: A
+
+Purchase Cost: 2,000,000 MMK
+Asking Price: 2,500,000 MMK
+
+Location: Yangon
+Status: In Stock
+```
+
+Recommended table:
+
+## `inventory_units`
+
+| Field              | Purpose                       |
+| ------------------ | ----------------------------- |
+| id                 | Primary key                   |
+| uuid               | Public-safe identifier        |
+| shop_id            | Shop                          |
+| item_id            | Item / variant                |
+| location_id        | Current location              |
+| purchase_detail_id | Original purchase line        |
+| status             | Current lifecycle status      |
+| condition          | new / used / refurbished      |
+| condition_grade    | A / B / C etc.                |
+| purchase_cost      | Cost of this exact device     |
+| asking_price       | Device-specific selling price |
+| minimum_sale_price | Optional price floor          |
+| warranty_until     | Warranty expiry               |
+| received_at        | Received date                 |
+| last_sold_at       | Latest sale time              |
+| note               | Notes                         |
+
+---
+
+# 9. Device Statuses
+
+Recommended statuses:
+
+```text
+in_stock
+reserved
+sold
+quarantined
+damaged
+under_repair
+lost
+returned_to_supplier
+disposed
+```
+
+Important:
+
+The following should NOT be permanent statuses:
+
+```text
+transferred
+sale_return
+purchase_return
+```
+
+Those are events.
+
+Example transfer:
+
+```text
+Before:
+Yangon
+status = in_stock
+
+Transfer Yangon → Mandalay
+
+After:
+Mandalay
+status = in_stock
+```
+
+---
+
+# 10. Inventory Unit Identifiers
+
+Identifiers must be stored separately from the physical inventory unit.
+
+Recommended table:
+
+## `inventory_unit_identifiers`
+
+| Field             | Purpose                                  |
+| ----------------- | ---------------------------------------- |
+| id                | Primary key                              |
+| shop_id           | Shop                                     |
+| inventory_unit_id | Physical device                          |
+| identifier_type   | imei / serial / eid / device_no / custom |
+| slot              | Identifier slot                          |
+| value             | Original value                           |
+| normalized_value  | Normalized search value                  |
+| is_primary        | Main identifier                          |
+
+Example:
+
+| Unit | Type   | Slot | Value           |
+| ---- | ------ | ---: | --------------- |
+| 101  | IMEI   |    1 | 351234567890001 |
+| 101  | IMEI   |    2 | 351234567890019 |
+| 101  | Serial |    - | ABC123XYZ       |
+| 101  | EID    |    - | 89049...        |
+
+IMEI must be stored as text/string.
+
+Do not store IMEI as an integer.
+
+---
+
+# 11. Identifier Validation
+
+IMEI should normally be validated using:
+
+- 15 digits
+- No letters
+- Normalize spaces/hyphens
+- Luhn checksum where applicable
+- Unique within the shop
+
+Example:
+
+```text
+351 234-567 890 001
+```
+
+should normalize to:
+
+```text
+351234567890001
+```
+
+Serial numbers may have different validation rules.
+
+Custom identifiers should not automatically use IMEI validation.
+
+---
+
+# 12. Inventory Unit Attributes
+
+Serialized products may require extra information.
+
+Examples:
+
+- Battery Health
+- Screen Condition
+- Box Included
+- Charger Included
+- Repair History
+- SSD Health
+- Cycle Count
+- Shutter Count
+- Lens Condition
+
+Do not create dedicated database columns for every possible product-specific field.
+
+Recommended table:
+
+## `inventory_unit_attributes`
+
+| Field             | Purpose                                     |
+| ----------------- | ------------------------------------------- |
+| id                | Primary key                                 |
+| inventory_unit_id | Device                                      |
+| attribute_key     | Attribute                                   |
+| value             | Value                                       |
+| value_type        | text / number / boolean / date / percentage |
+
+Example:
+
+| Attribute        | Value           |
+| ---------------- | --------------- |
+| battery_health   | 87              |
+| box_included     | true            |
+| charger_included | false           |
+| screen_condition | Minor scratches |
+
+---
+
+# 13. Pricing Requirements
+
+The current default product price remains in:
+
+```text
+item_prices
+```
+
+Serialized inventory introduces optional device-specific pricing.
+
+Pricing priority:
+
+```text
+inventory_units.asking_price
+
+if null
+
+item_prices.price
+```
+
+Example:
+
+```text
+Item Default Price
+3,000,000 MMK
+
+Unit A
+asking_price = null
+POS Price = 3,000,000
+
+Unit B
+asking_price = 2,500,000
+POS Price = 2,500,000
+```
+
+This is required mainly for:
+
+- Secondhand phones
+- Refurbished phones
+- Different conditions
+- Different acquisition costs
+- Different market value
+
+---
+
+# 14. Color / Storage / Standard Differences
+
+Standard product differences should continue using the existing variant system.
+
+Example:
+
+```text
+iPhone 15 128GB
+
+├── Black
+│    ├── IMEI A
+│    └── IMEI B
+│
+└── Blue
+     └── IMEI C
+```
+
+The following normally belong to item variants:
+
+- Color
+- Storage
+- RAM
+- Model
+- Size
+
+The following belong to individual inventory units:
+
+- Condition
+- Battery Health
+- Device-specific cost
+- Device-specific asking price
+- Repair history
+
+---
+
+# 15. Sale Design Decision
+
+The system will use:
+
+> One order detail per serialized physical unit.
+
+Example:
+
+```text
+Order #1001
+
+Order Detail #1
+iPhone
+IMEI A
+Quantity = 1
+Price = 2,500,000
+
+Order Detail #2
+iPhone
+IMEI B
+Quantity = 1
+Price = 2,300,000
+```
+
+Do NOT store:
+
+```text
+iPhone
+Quantity = 2
+Price = ???
+```
+
+for serialized products.
+
+The frontend may visually group these records.
+
+---
+
+# 16. Order Detail Requirements
+
+For quantity-based products:
+
+```text
+inventory_unit_id = null
+quantity = normal quantity
+```
+
+For serialized products:
+
+```text
+inventory_unit_id = required
+quantity = 1
+```
+
+Recommended additional relationship:
+
+```text
+order_details.inventory_unit_id
+```
+
+The final actual selling price remains stored in the order detail.
+
+---
+
+# 17. Historical Cost Snapshot
+
+If the current system does not already preserve historical cost, add:
+
+```text
+cost_price_snapshot
+```
+
+to the sale detail or equivalent historical sales record.
+
+Example:
+
+```text
+Device Purchase Cost:
+2,000,000
+
+Sold Price:
+2,500,000
+
+Gross Profit:
+500,000
+```
+
+Even if the inventory unit's cost is changed later, old profit reports must remain unchanged.
+
+---
+
+# 18. Purchase Workflow
+
+When purchasing a serialized product:
+
+Example:
+
+```text
+Purchase
+
+iPhone 15 Pro
+Quantity = 3
+```
+
+The system must require three physical device records.
+
+```text
+Purchase Detail
+Quantity = 3
+
+↓ creates
+
+Inventory Unit A
+Inventory Unit B
+Inventory Unit C
+```
+
+For each unit, the user enters/scans identifiers.
+
+Example:
+
+```text
+Unit A
+IMEI 001
+Serial A
+
+Unit B
+IMEI 002
+Serial B
+
+Unit C
+IMEI 003
+Serial C
+```
+
+The number of inventory units must equal the purchased quantity.
+
+Serialized items cannot use fractional physical quantity.
+
+Invalid example:
+
+```text
+1.5 phones
+```
+
+---
+
+# 19. Purchase Transaction Requirements
+
+Serialized purchase should:
+
+1. Create purchase.
+2. Create purchase detail.
+3. Validate serialized units.
+4. Validate required identifiers.
+5. Validate identifier uniqueness.
+6. Create inventory units.
+7. Create identifiers.
+8. Create optional attributes.
+9. Increase aggregate stock.
+10. Create stock transaction.
+11. Create unit movement history.
+12. Commit all changes.
+
+All steps must run inside the same database transaction.
+
+If any step fails, the whole operation must rollback.
+
+---
+
+# 20. POS / Sale Workflow
+
+When cashier selects a serialized item, the POS should require selection or scanning of the exact available unit.
+
+Example display:
+
+| IMEI   | Condition | Asking Price |
+| ------ | --------- | -----------: |
+| ...001 | New       |    3,000,000 |
+| ...002 | Used A    |    2,500,000 |
+| ...003 | Used B    |    2,200,000 |
+
+Cashier may select or scan:
+
+```text
+IMEI ...002
+```
+
+System must validate:
+
+- Correct shop
+- Correct item
+- Correct location
+- Status is `in_stock`
+- Unit has not already been selected
+- Unit has not already been sold
+
+Then:
+
+```text
+inventory_unit.status
+in_stock → sold
+```
+
+Aggregate stock decreases by 1.
+
+Movement history is created.
+
+---
+
+# 21. Concurrent Sale Protection
+
+The same IMEI must never be sold twice.
+
+Example:
+
+Cashier A selects:
+
+```text
+IMEI 001
+```
+
+At the same time Cashier B attempts:
+
+```text
+IMEI 001
+```
+
+Only one sale must succeed.
+
+Use database transactions and row locking where appropriate.
+
+---
+
+# 22. Sale Return
+
+Sale returns must use the exact device that was originally sold.
+
+Example:
+
+Original order:
+
+```text
+IMEI 001
+```
+
+Customer attempts to return:
+
+```text
+IMEI 002
+```
+
+System must reject.
+
+Even if both are:
+
+```text
+iPhone 15 Pro Black
+```
+
+Only:
+
+```text
+IMEI 001
+```
+
+is valid.
+
+---
+
+# 23. Returned Device Lifecycle
+
+Recommended process:
+
+```text
+sold
+   ↓
+sale_return
+   ↓
+quarantined
+```
+
+The device should then be inspected.
+
+Possible result:
+
+```text
+quarantined
+   ↓
+in_stock
+```
+
+or:
+
+```text
+quarantined
+   ↓
+damaged
+```
+
+This prevents automatically reselling a potentially damaged returned device.
+
+---
+
+# 24. Purchase Return
+
+When returning devices to the supplier, exact inventory units must be selected.
+
+Example:
+
+Purchased:
+
+```text
+IMEI A
+IMEI B
+IMEI C
+```
+
+Return:
+
+```text
+IMEI A
+IMEI C
+```
+
+The system must:
+
+- Validate purchase source
+- Validate shop
+- Validate location
+- Validate eligibility
+- Decrease aggregate stock
+- Set unit status to `returned_to_supplier`
+- Create purchase return transaction
+- Create movement history
+
+---
+
+# 25. Stock Transfer
+
+Serialized transfer must select exact devices.
+
+Example:
+
+```text
+Yangon → Mandalay
+
+IMEI 001
+IMEI 002
+IMEI 003
+```
+
+After transfer:
+
+```text
+location_id = Mandalay
+status = in_stock
+```
+
+Do not set:
+
+```text
+status = transferred
+```
+
+Transfer is a movement, not a state.
+
+Aggregate stocks must update:
+
+```text
+Yangon -3
+Mandalay +3
+```
+
+---
+
+# 26. Stock Adjustments
+
+Serialized adjustments must reference exact units.
+
+Examples:
+
+```text
+IMEI 001
+Reason: Lost
+
+in_stock → lost
+```
+
+or:
+
+```text
+IMEI 002
+Reason: Damaged
+
+in_stock → damaged
+```
+
+Adjustment must also create appropriate aggregate stock transactions where required.
+
+---
+
+# 27. Inventory Unit Movement History
+
+Every important physical-device event must be recorded.
+
+Recommended table:
+
+## `inventory_unit_movements`
+
+Important fields:
+
+| Field                | Purpose                     |
+| -------------------- | --------------------------- |
+| inventory_unit_id    | Device                      |
+| stock_transaction_id | Related stock ledger record |
+| referenceable_type   | Source document type        |
+| referenceable_id     | Source document             |
+| from_location_id     | Previous location           |
+| to_location_id       | New location                |
+| movement_type        | Event                       |
+| from_status          | Previous status             |
+| to_status            | New status                  |
+| performed_by         | User                        |
+| occurred_at          | Event time                  |
+| note                 | Notes                       |
+
+---
+
+# 28. Movement Types
+
+Recommended values:
+
+```text
+purchase_received
+
+sale
+
+sale_return
+
+purchase_return
+
+transfer
+
+adjustment_in
+
+adjustment_out
+
+reservation
+
+reservation_release
+
+damage
+
+repair_out
+
+repair_return
+
+loss
+
+disposal
+
+warranty_replacement
+```
+
+---
+
+# 29. Device History Page
+
+The system should provide a page where staff can search by:
+
+```text
+IMEI
+Serial Number
+EID
+Device Number
+```
+
+Example result:
+
+```text
+iPhone 15 Pro 256GB
+Natural Titanium
+
+IMEI
+351234567890001
+
+Status
+In Stock
+
+Location
+Mandalay Branch
+
+Condition
+Used A
+
+Purchase Cost
+2,500,000
+
+Asking Price
+2,850,000
+```
+
+History:
+
+```text
+10 Jan
+Purchased
+Yangon Branch
+
+15 Jan
+Transferred
+Yangon → Mandalay
+
+20 Jan
+Sold
+Order SO-123
+Customer Mg Mg
+
+24 Jan
+Sale Return
+
+24 Jan
+Quarantined
+
+26 Jan
+Sent for Repair
+
+29 Jan
+Repair Completed
+
+29 Jan
+Returned to Stock
+```
+
+---
+
+# 30. Stock Balance Definition
+
+The existing `stocks.balance_quantity` should continue representing aggregate physical stock.
+
+For serialized inventory, recommended on-hand statuses:
+
+| Status               | Count in on-hand stock |
+| -------------------- | ---------------------: |
+| in_stock             |                    Yes |
+| reserved             |                    Yes |
+| quarantined          |                    Yes |
+| damaged              |                    Yes |
+| under_repair         |            Usually Yes |
+| sold                 |                     No |
+| lost                 |                     No |
+| returned_to_supplier |                     No |
+| disposed             |                     No |
+
+---
+
+# 31. Available Stock
+
+Available stock is different from on-hand stock.
+
+Example:
+
+```text
+In Stock       7
+Reserved       2
+Damaged        1
+
+On Hand       10
+
+Available      7
+```
+
+For serialized products:
+
+```text
+Available Quantity
+=
+inventory_units where status = in_stock
+```
+
+---
+
+# 32. Reconciliation Requirement
+
+For serialized products, the system should be able to compare:
+
+```text
+stocks.balance_quantity
+```
+
+against:
+
+```text
+physical inventory unit count
+```
+
+Example:
+
+```text
+Stock Balance = 10
+Physical Units = 9
+```
+
+System should report:
+
+```text
+Inventory discrepancy detected.
+```
+
+Do not silently auto-correct discrepancies.
+
+---
+
+# 33. Multi-Shop / Tenant Security
+
+ZiiGwat POS is a multi-shop system.
+
+Every serialized inventory query must respect:
+
+```text
+shop_id
+```
+
+Shop A must never be able to:
+
+- Search Shop B IMEI
+- View Shop B devices
+- Sell Shop B device
+- Transfer Shop B device
+- Return Shop B device
+- Modify Shop B device
+
+Server-side validation is required.
+
+Do not rely only on frontend filtering.
+
+---
+
+# 34. Location Security
+
+A device may only be sold from its current location unless there is an explicit existing business rule allowing otherwise.
+
+Example:
+
+```text
+IMEI 001
+
+Current Location:
+Yangon
+```
+
+Mandalay POS must not sell the device.
+
+It must first be transferred properly.
+
+---
+
+# 35. Database Transactions
+
+The following operations must be atomic:
+
+- Serialized purchase
+- Serialized sale
+- Sale return
+- Purchase return
+- Stock transfer
+- Stock adjustment
+- Loss
+- Disposal
+
+The following must never occur:
+
+```text
+stocks says quantity = 5
+
+but
+
+inventory_units says quantity = 4
+```
+
+because part of a transaction failed.
+
+---
+
+# 36. Backward Compatibility
+
+This feature must not break existing quantity inventory.
+
+Existing products should default to:
+
+```text
+inventory_tracking = quantity
+```
+
+Existing:
+
+- Purchases
+- Sales
+- Returns
+- Transfers
+- Adjustments
+- Reports
+
+must continue working for normal products.
+
+---
+
+# 37. Existing Stock Conversion
+
+If an existing product currently has:
+
+```text
+Stock = 20
+```
+
+the user must not simply change:
+
+```text
+quantity → serialized
+```
+
+without registering the physical devices.
+
+The safe behavior is either:
+
+1. Prevent conversion while stock exists.
+
+or
+
+2. Provide an onboarding process requiring exactly 20 physical units to be registered.
+
+Example:
+
+```text
+Existing Quantity = 20
+
+Required:
+20 IMEI / Serial units
+```
+
+Only then activate serialized tracking.
+
+For the initial implementation, blocking conversion when existing stock exists is acceptable and safer.
+
+---
+
+# 38. Core Database Relationships
+
+High-level database design:
+
+```text
+ITEMS
+ │
+ ├── ITEM_PRICES
+ │
+ ├── ITEM_IDENTIFIER_REQUIREMENTS
+ │
+ ├── STOCKS
+ │     └── STOCK_TRANSACTIONS
+ │
+ └── INVENTORY_UNITS
+        │
+        ├── INVENTORY_UNIT_IDENTIFIERS
+        ├── INVENTORY_UNIT_ATTRIBUTES
+        └── INVENTORY_UNIT_MOVEMENTS
+```
+
+Purchase:
+
+```text
+PURCHASE
+   │
+   └── PURCHASE_DETAILS
+              │
+              └── INVENTORY_UNITS
+```
+
+Sale:
+
+```text
+ORDER
+   │
+   └── ORDER_DETAILS
+              │
+              └── INVENTORY_UNIT
+```
+
+Returns:
+
+```text
+SALE_RETURN_DETAILS
+        │
+        └── INVENTORY_UNIT
+
+PURCHASE_RETURN_DETAILS
+        │
+        └── INVENTORY_UNIT
+```
+
+Transfer:
+
+```text
+STOCK_TRANSFER
+      │
+      └── INVENTORY_UNIT
+```
+
+Adjustment:
+
+```text
+ADJUSTMENT_DETAIL
+       │
+       └── INVENTORY_UNIT
+```
+
+---
+
+# 39. Core Business Rules
+
+The following rules are mandatory.
+
+### Rule 1
+
+IMEI and Serial Numbers identify physical devices.
+
+They are not product records.
+
+### Rule 2
+
+One physical serialized device = one `inventory_unit`.
+
+### Rule 3
+
+One physical serialized sale = one `order_detail`.
+
+### Rule 4
+
+Serialized sale quantity must be `1`.
+
+### Rule 5
+
+Serialized order detail must reference an `inventory_unit`.
+
+### Rule 6
+
+Sale return must reference the exact device originally sold.
+
+### Rule 7
+
+Purchase return must identify the exact unit returned.
+
+### Rule 8
+
+Stock transfer must identify exact serialized units.
+
+### Rule 9
+
+Transfer is a movement, not a device status.
+
+### Rule 10
+
+Sale return is a movement, not a device status.
+
+### Rule 11
+
+Default price belongs to `item_prices`.
+
+### Rule 12
+
+Device-specific asking price belongs to `inventory_units`.
+
+### Rule 13
+
+Final historical selling price belongs to the sale/order detail.
+
+### Rule 14
+
+Color/storage/RAM should normally use product variants.
+
+### Rule 15
+
+Condition and device-specific value belong to the inventory unit.
+
+### Rule 16
+
+Aggregate stock and serialized units must always remain synchronized.
+
+### Rule 17
+
+Every operation must respect shop and location ownership.
+
+---
+
+# 40. Minimum UI Requirements
+
+The implementation should include the following screens or integrations.
+
+## Item Create / Edit
+
+Allow:
+
+```text
+Inventory Tracking
+
+○ Quantity
+○ Serialized / IMEI / Serial
+```
+
+If serialized:
+
+configure required identifiers.
+
+---
+
+## Purchase
+
+For serialized products:
+
+- Enter/scan individual devices
+- Enter IMEI / Serial
+- Condition
+- Grade
+- Cost
+- Asking Price
+- Optional attributes
+
+---
+
+## Serialized Inventory List
+
+Display/filter:
+
+- Item
+- IMEI / Serial
+- Location
+- Status
+- Condition
+- Asking Price
+
+Search by:
+
+- IMEI
+- Serial
+- EID
+- Device Number
+
+---
+
+## Device Detail
+
+Display:
+
+- Product
+- Identifiers
+- Current status
+- Location
+- Cost
+- Asking price
+- Condition
+- Attributes
+- Complete movement history
+
+---
+
+## POS
+
+For serialized items:
+
+- Select/scan physical unit
+- Display identifiers
+- Condition
+- Asking price
+- Availability
+- Prevent duplicate selection
+
+---
+
+## Returns / Transfers / Adjustments
+
+Must allow selection of exact serialized units.
+
+---
+
+# 41. Testing Requirements
+
+At minimum, automated tests should cover:
+
+## Items
+
+- Normal quantity item still works
+- Serialized item configuration works
+
+## Identifiers
+
+- Valid IMEI
+- Invalid IMEI
+- Duplicate IMEI
+- IMEI shop isolation
+- Dual IMEI
+- Optional serial number
+
+## Purchase
+
+- Correct number of serialized units required
+- Duplicate identifier rejects transaction
+- Stock balance updates
+- Inventory units created
+
+## Sale
+
+- Exact unit required
+- Wrong location rejected
+- Sold unit rejected
+- Same IMEI cannot sell twice
+- Asking price used
+- Default price fallback works
+- Order detail quantity = 1
+
+## Sale Return
+
+- Correct device accepted
+- Wrong IMEI rejected
+- Already-returned device rejected
+
+## Purchase Return
+
+- Correct physical units returned
+
+## Transfer
+
+- Device location changes
+- Source stock decreases
+- Destination stock increases
+
+## Adjustment
+
+- Lost device handled correctly
+- Damaged device handled correctly
+
+## Tenancy
+
+- Shop A cannot access Shop B serialized inventory
+
+## Reconciliation
+
+- Correct balance passes
+- Incorrect balance is detected
+
+---
+
+# 42. Suggested Implementation Order
+
+Recommended implementation sequence:
+
+### Phase 1 — Database Foundation
+
+Implement:
+
+- Inventory tracking mode
+- Identifier requirements
+- Inventory units
+- Identifiers
+- Attributes
+- Movement history
+
+---
+
+### Phase 2 — Item Configuration
+
+Implement serialized configuration in item create/edit.
+
+---
+
+### Phase 3 — Purchase Receiving
+
+Register physical devices during purchase.
+
+---
+
+### Phase 4 — Serialized Inventory Management
+
+Implement:
+
+- List
+- Search
+- Device details
+- History
+
+---
+
+### Phase 5 — POS Sale
+
+Select exact IMEI/device during sale.
+
+---
+
+### Phase 6 — Sale Return
+
+Return exact sold device.
+
+---
+
+### Phase 7 — Purchase Return
+
+Return exact purchased unit.
+
+---
+
+### Phase 8 — Stock Transfer
+
+Transfer exact devices.
+
+---
+
+### Phase 9 — Adjustment / Damage / Loss
+
+Support serialized adjustments.
+
+---
+
+### Phase 10 — Reconciliation and Testing
+
+Complete stock reconciliation, concurrency review, permissions review, and regression tests.
+
+---
+
+# 43. Development Expectations
+
+The developer must:
+
+- Review the existing ZiiGwat codebase before implementation.
+- Reuse the current stock services and business logic where possible.
+- Avoid duplicating stock calculations.
+- Avoid placing all logic directly inside controllers.
+- Use database transactions.
+- Use row locking where required.
+- Respect existing code conventions.
+- Preserve existing quantity inventory.
+- Preserve historical data.
+- Add proper indexes and foreign keys where suitable.
+- Maintain multi-shop tenant security.
+- Write automated tests.
+- Avoid unrelated refactoring during this feature.
+
+---
+
+# 44. Deliverables
+
+The completed feature should include:
+
+1. Database migrations
+2. Models and relationships
+3. Serialized inventory business/service logic
+4. Item configuration UI
+5. Purchase receiving integration
+6. Serialized inventory list/search
+7. Device detail/history page
+8. POS integration
+9. Sale return integration
+10. Purchase return integration
+11. Transfer integration
+12. Adjustment/loss/damage integration
+13. Reconciliation functionality
+14. Permission/tenancy validation
+15. Automated tests
+16. Technical notes for future maintenance
+
+---
+
+# 45. Definition of Done
+
+The feature is considered complete when:
+
+- Existing quantity inventory still works.
+- Serialized products can be configured.
+- Purchases can register exact physical devices.
+- IMEI/Serial uniqueness is enforced correctly.
+- Every serialized unit can be searched.
+- Every unit has a traceable history.
+- POS cannot sell a serialized item without selecting a physical unit.
+- The same device cannot be sold twice.
+- Returned devices must match the original sold units.
+- Transfers correctly move exact units between locations.
+- Stock adjustments affect exact physical units.
+- Aggregate stock remains synchronized with physical devices.
+- Shop/location access restrictions are enforced.
+- Relevant automated tests pass.
