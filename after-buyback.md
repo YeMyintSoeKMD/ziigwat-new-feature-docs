@@ -1,0 +1,513 @@
+# sidenote: below message is after i asked like this
+```
+when buyback, yes i know asking price in inventory unit will be updated, and what i want to know is that will inventory unit fields like grade, condition, will be updated too, and where is like those histories?
+```
+
+--- 
+
+Yes — **`inventory_units` should represent the device's current/latest state**. So when the same phone is bought back one year later, fields such as `condition`, `condition_grade`, `asking_price`, `purchase_cost`, warranty, and other current attributes can be updated.
+
+But you're right to ask: **if we overwrite those fields, where do the old values go?**
+
+That reveals an important addition to our design: `inventory_unit_movements` alone is **not enough** to preserve condition/grade/price history.
+
+## Think of `inventory_units` as the current snapshot
+
+For IMEI `12345`, originally:
+
+```text
+inventory_units
+
+id: 101
+item: iPhone 18 Pro
+status: in_stock
+condition: new
+condition_grade: null
+purchase_cost: 3,000,000
+asking_price: 3,500,000
+```
+
+After selling:
+
+```text
+status: sold
+```
+
+One year later, you buy it back. Now the real-world device may be:
+
+```text
+Condition: used
+Grade: B
+Battery: 83%
+Purchase / Buyback Cost: 1,800,000
+Asking Price: 2,200,000
+```
+
+So yes, update the same `inventory_units` row:
+
+```text
+inventory_units #101
+
+status: quarantined
+condition: used
+condition_grade: B
+purchase_cost: 1,800,000
+asking_price: 2,200,000
+```
+
+That row answers:
+
+> **What is this phone like right now?**
+
+---
+
+# But don't lose the previous state
+
+I would add another table specifically for this:
+
+## `inventory_unit_state_history`
+
+This stores historical snapshots whenever important device information changes.
+
+| Field | Purpose |
+|---|---|
+| id | History ID |
+| inventory_unit_id | Physical device |
+| referenceable_type | Source, e.g. Purchase, Buyback, Inspection |
+| referenceable_id | Source document ID |
+| event_type | received / buyback / inspection / manual_update |
+| status | Status at that moment |
+| condition | Condition at that moment |
+| condition_grade | Grade at that moment |
+| purchase_cost | Cost at that moment |
+| asking_price | Asking price at that moment |
+| minimum_sale_price | Price floor at that moment |
+| location_id | Location |
+| attributes_snapshot | Optional JSON snapshot |
+| performed_by | User |
+| occurred_at | When it happened |
+| note | Notes |
+
+Then your architecture becomes:
+
+```text
+inventory_units
+     │
+     │ current/latest state
+     │
+     ├── inventory_unit_identifiers
+     │
+     ├── inventory_unit_attributes
+     │
+     ├── inventory_unit_movements
+     │       └── where/how/status movement
+     │
+     └── inventory_unit_state_history
+             └── condition/grade/cost/price history
+```
+
+## Movement history vs state history
+
+These two solve different problems.
+
+### `inventory_unit_movements`
+
+Answers:
+
+> **What happened to the device?**
+
+Example:
+
+```text
+Purchased
+Sold
+Bought Back
+Transferred
+Sent for Repair
+Returned from Repair
+Sold Again
+```
+
+It stores things like:
+
+```text
+movement_type
+from_status
+to_status
+from_location
+to_location
+reference
+```
+
+### `inventory_unit_state_history`
+
+Answers:
+
+> **What was the device like at that time?**
+
+Example:
+
+```text
+2026 Purchase
+Condition: New
+Cost: 3,000,000
+Asking: 3,500,000
+
+2027 Buyback
+Condition: Used
+Grade: B
+Cost: 1,800,000
+Asking: 2,200,000
+
+2027 Inspection
+Condition: Used
+Grade: C
+Asking: 2,050,000
+Battery: 81%
+```
+
+That's the distinction I recommend.
+
+---
+
+# Your iPhone example
+
+Let's follow IMEI `12345`.
+
+### First purchase
+
+Current `inventory_units`:
+
+```text
+IMEI: 12345
+
+condition = new
+grade = null
+purchase_cost = 3,000,000
+asking_price = 3,500,000
+status = in_stock
+```
+
+Create state history:
+
+```text
+State History #1
+
+event_type = purchase_received
+condition = new
+grade = null
+purchase_cost = 3,000,000
+asking_price = 3,500,000
+```
+
+And movement:
+
+```text
+Movement #1
+
+purchase_received
+null → in_stock
+```
+
+---
+
+### First sale
+
+You sell it for 3,400,000.
+
+The sale detail preserves:
+
+```text
+order_details
+
+inventory_unit_id = 101
+cost_price_snapshot = 3,000,000
+final_price = 3,400,000
+```
+
+Current unit:
+
+```text
+status = sold
+```
+
+Movement:
+
+```text
+Movement #2
+
+sale
+in_stock → sold
+```
+
+You don't necessarily need another state-history row unless some descriptive/device state changed.
+
+---
+
+# One year later — buyback
+
+Customer brings IMEI `12345`.
+
+System finds existing:
+
+```text
+inventory_unit #101
+status = sold
+```
+
+Shop assesses it:
+
+```text
+condition = used
+grade = B
+battery_health = 83
+buyback_price = 1,800,000
+asking_price = 2,200,000
+```
+
+Create the **buyback document first**:
+
+```text
+buyback_details
+
+inventory_unit_id = 101
+buyback_price = 1,800,000
+condition = used
+condition_grade = B
+asking_price = 2,200,000
+```
+
+This itself is already an important historical snapshot of the buyback transaction.
+
+Then update current `inventory_units`:
+
+```text
+condition = used
+condition_grade = B
+purchase_cost = 1,800,000
+asking_price = 2,200,000
+status = quarantined
+```
+
+Update attributes:
+
+```text
+battery_health = 83
+```
+
+Create movement:
+
+```text
+Movement #3
+
+buyback_received
+sold → quarantined
+```
+
+And create state history:
+
+```text
+State History #2
+
+event_type = buyback
+condition = used
+condition_grade = B
+purchase_cost = 1,800,000
+asking_price = 2,200,000
+battery_health = 83
+```
+
+Now nothing from the original ownership cycle has been lost.
+
+---
+
+# What if grade changes after inspection?
+
+This matters too.
+
+At buyback counter, staff estimates:
+
+```text
+Grade B
+```
+
+Later technician checks it and finds:
+
+```text
+Battery = 78%
+Face ID problem
+Screen replaced
+```
+
+and decides:
+
+```text
+Grade C
+Asking Price = 1,950,000
+```
+
+Update current `inventory_units`:
+
+```text
+condition_grade = C
+asking_price = 1,950,000
+status = in_stock
+```
+
+Update current attributes.
+
+But also create:
+
+```text
+State History #3
+
+event_type = inspection
+condition = used
+grade = C
+asking_price = 1,950,000
+
+attributes:
+battery_health = 78
+face_id = faulty
+screen_replaced = yes
+```
+
+Movement can separately say:
+
+```text
+inspection_passed
+quarantined → in_stock
+```
+
+So later you can see both.
+
+---
+
+# I would also snapshot flexible attributes
+
+Since things like battery health can change over time, your current:
+
+```text
+inventory_unit_attributes
+```
+
+should represent **current attributes**.
+
+Example:
+
+```text
+battery_health = 78
+screen_condition = minor scratches
+box_included = false
+```
+
+For history, don't overwrite without preserving history somewhere.
+
+The easiest design is to add:
+
+```text
+attributes_snapshot JSON
+```
+
+to `inventory_unit_state_history`.
+
+For example:
+
+```json
+{
+  "battery_health": 83,
+  "screen_condition": "minor scratches",
+  "box_included": true,
+  "charger_included": false
+}
+```
+
+Later inspection:
+
+```json
+{
+  "battery_health": 78,
+  "screen_condition": "moderate scratches",
+  "box_included": true,
+  "charger_included": false,
+  "face_id": "faulty"
+}
+```
+
+You could normalize attribute history into another table later if you need heavy analytics, but for ZiiGwat I would start with a snapshot because it's much simpler.
+
+---
+
+# So there are actually four different historical concepts
+
+This is how I would finalize the model:
+
+| Table | Meaning |
+|---|---|
+| `inventory_units` | **Current state** of the phone |
+| `inventory_unit_identifiers` | Permanent identity such as IMEI |
+| `inventory_unit_movements` | **What happened** / lifecycle history |
+| `inventory_unit_state_history` | **What the device looked like/value was** at a point in time |
+| `order_details`, `purchase_details`, `buyback_details` | Financial/document history |
+
+For example:
+
+```text
+                        IMEI 12345
+                            │
+                  inventory_unit #101
+                            │
+          CURRENT STATE ────┼──── IDENTITY
+                            │
+            Used / Grade C  │    IMEI 12345
+            Cost 1,800,000  │
+            Ask 1,950,000   │
+            In Stock        │
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+             ▼                             ▼
+      MOVEMENT HISTORY               STATE HISTORY
+
+      Purchase                       New
+      Sale                           Cost 3,000,000
+      Buyback                        Ask 3,500,000
+      Inspection
+      Resale                         Used / Grade B
+                                     Cost 1,800,000
+                                     Ask 2,200,000
+
+                                     Used / Grade C
+                                     Battery 78%
+                                     Ask 1,950,000
+```
+
+## One more important correction to our earlier model
+
+I would therefore **not expect `inventory_units.purchase_cost`, `condition`, `condition_grade`, or `asking_price` to preserve historical values**.
+
+Their semantic meaning should explicitly be:
+
+```text
+inventory_units.purchase_cost
+= current/latest acquisition cost
+
+inventory_units.condition
+= current condition
+
+inventory_units.condition_grade
+= current grade
+
+inventory_units.asking_price
+= current asking price
+```
+
+Historical values belong in transactional documents and `inventory_unit_state_history`.
+
+That makes the design much cleaner, especially because the same IMEI might be:
+
+```text
+New → Sold → Bought Back → Used B → Sold → Bought Back Again → Used C
+```
+
+several times during its lifetime.
